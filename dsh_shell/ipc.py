@@ -1,0 +1,11 @@
+"""Commands passed from the tray/instance host to the webview process."""
+
+SHOW_MAIN = "show_main"
+TOGGLE_MAIN = "toggle_main"
+OPEN_SETTINGS = "open_settings"
+RELOAD = "reload"
+OPEN_EXTERNAL = "open_external"
+RESTART_DSH = "restart_dsh"
+QUIT = "quit"
+TRAY_UNAVAILABLE = "tray_unavailable"
+HEALTH = "health"

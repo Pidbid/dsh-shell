@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+.python-version.lock
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+junit-*.xml
+tests.log
+
+# uv / build
+/build/
+/dist/
+/*.build/
+*.onefile-build/
+*.dist/
+*.spec
+nuitka-crash-report.xml
+
+# local runtime data
+/.dsh-shell/
+/runtime/
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Secrets
+.env
+.env.*
+!.env.example

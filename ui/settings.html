@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>dsh-shell · 设置</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <div id="app">
+    <header class="titlebar">
+      <div class="titlebar-drag pywebview-drag-region">
+        <img class="brand-logo" src="../assets/icon.png" alt="">
+        <span class="brand-name">dsh-shell</span>
+        <span class="brand-version" id="brand-version"></span>
+      </div>
+      <div class="titlebar-actions">
+        <button class="icon-btn" id="btn-close" title="关闭设置" aria-label="关闭设置">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <nav class="sidebar" aria-label="设置分类">
+        <div class="sidebar-heading">工作台</div>
+        <button class="nav-item active" data-tab="overview">
+          <span class="nav-icon">◈</span><span>概览</span>
+        </button>
+        <button class="nav-item" data-tab="mcp">
+          <span class="nav-icon">⌘</span><span>MCP 服务器</span>
+          <span class="nav-badge" id="mcp-count">0</span>
+        </button>
+        <button class="nav-item" data-tab="skills">
+          <span class="nav-icon">✳</span><span>Skills</span>
+          <span class="nav-badge" id="skills-count">0</span>
+        </button>
+        <div class="sidebar-heading">关于</div>
+        <button class="nav-item" data-tab="about">
+          <span class="nav-icon">ⓘ</span><span>应用信息</span>
+        </button>
+        <div class="sidebar-footer">
+          <span class="status-dot" id="sidebar-dot"></span>
+          <span id="sidebar-status">正在连接…</span>
+        </div>
+      </nav>
+
+      <main class="content">
+        <div class="banner hidden" id="runtime-error"></div>
+
+        <section class="panel active" data-panel="overview">
+          <div class="panel-head">
+            <div>
+              <h1>概览</h1>
+              <p class="subtitle">壳层与 DeepSeek Harness 运行状态</p>
+            </div>
+            <button class="btn secondary" id="btn-refresh-overview">刷新</button>
+          </div>
+          <div class="card-grid">
+            <article class="card stat-card">
+              <div class="stat-label">Harness 连接</div>
+              <div class="stat-value" id="ov-connection">—</div>
+              <div class="stat-note" id="ov-connection-note">—</div>
+            </article>
+            <article class="card stat-card">
+              <div class="stat-label">运行方式</div>
+              <div class="stat-value" id="ov-mode">—</div>
+              <div class="stat-note" id="ov-mode-note">—</div>
+            </article>
+            <article class="card stat-card">
+              <div class="stat-label">MCP 服务器</div>
+              <div class="stat-value" id="ov-mcp">—</div>
+              <div class="stat-note" id="ov-mcp-note">—</div>
+            </article>
+            <article class="card stat-card">
+              <div class="stat-label">Skills</div>
+              <div class="stat-value" id="ov-skills">—</div>
+              <div class="stat-note" id="ov-skills-note">—</div>
+            </article>
+          </div>
+
+          <div class="card path-card">
+            <div class="card-title">路径</div>
+            <div class="path-row"><span>Profile</span><code id="ov-profile">—</code></div>
+            <div class="path-row"><span>MCP patch</span><code id="ov-mcp-path">—</code></div>
+            <div class="path-row"><span>Skills 根目录</span><code id="ov-skills-path">—</code></div>
+            <div class="path-row"><span>数据目录</span><code id="ov-data-path">—</code></div>
+          </div>
+
+          <div class="inline-actions">
+            <button class="btn secondary" id="btn-open-mcp-dir">打开 MCP 目录</button>
+            <button class="btn secondary" id="btn-open-skills-dir">打开 Skills 目录</button>
+            <button class="btn secondary" id="btn-open-external">在浏览器中打开</button>
+            <button class="btn danger-ghost" id="btn-restart-dsh">重启 DSH 服务</button>
+          </div>
+
+          <div class="hint">
+            复用已有 <code>dsh web</code> 服务时，Shell 不会重启它；重启按钮仅对 Shell 自己拉起的实例生效。
+          </div>
+        </section>
+
+        <section class="panel" data-panel="mcp">
+          <div class="panel-head">
+            <div>
+              <h1>MCP 服务器</h1>
+              <p class="subtitle">直接编辑 profile 的官方 <code>cordis.patch.yml</code>，保存后 harness 会热重载。</p>
+            </div>
+            <div class="head-actions">
+              <button class="btn secondary" id="btn-mcp-raw">原始 YAML</button>
+              <button class="btn primary" id="btn-mcp-add">新增 MCP</button>
+            </div>
+          </div>
+          <div class="toolbar">
+            <label class="field-inline">
+              <span>Profile</span>
+              <select id="mcp-profile"></select>
+            </label>
+            <span class="file-path" id="mcp-file-path"></span>
+            <button class="btn ghost" id="btn-mcp-refresh">刷新</button>
+          </div>
+          <div id="mcp-list" class="item-list"></div>
+        </section>
+
+        <section class="panel" data-panel="skills">
+          <div class="panel-head">
+            <div>
+              <h1>Skills</h1>
+              <p class="subtitle">管理 <code>~/.agents/skills</code> 下的目录包与平铺 Markdown；停用会移到 <code>skills-disabled</code>。</p>
+            </div>
+            <div class="head-actions">
+              <button class="btn secondary" id="btn-skills-dir">打开目录</button>
+              <button class="btn primary" id="btn-skill-add">新增 Skill</button>
+            </div>
+          </div>
+          <div class="toolbar">
+            <input class="input search" id="skill-search" type="search" placeholder="搜索名称或描述…" autocomplete="off">
+            <label class="field-inline">
+              <span>显示</span>
+              <select id="skill-filter">
+                <option value="all">全部</option>
+                <option value="enabled">已启用</option>
+                <option value="disabled">已停用</option>
+              </select>
+            </label>
+            <button class="btn ghost" id="btn-skills-refresh">刷新</button>
+          </div>
+          <div id="skills-list" class="item-list"></div>
+        </section>
+
+        <section class="panel" data-panel="about">
+          <div class="panel-head">
+            <div>
+              <h1>应用信息</h1>
+              <p class="subtitle">无边框桌面壳，尽量与 DeepSeek Harness 解耦。</p>
+            </div>
+          </div>
+          <div class="card about-card">
+            <div class="about-logo"><img src="../assets/icon.png" alt=""></div>
+            <div>
+              <div class="about-title">dsh-shell <span id="about-version"></span></div>
+              <p class="about-copy">
+                pywebview + Python 3.12 的桌面壳。优先复用本机已有 dsh web 服务；
+                没有可用服务时通过 dsh / npx / pnpm / npm 拉起独立实例。
+              </p>
+              <div class="path-row"><span>平台</span><code id="about-platform">—</code></div>
+              <div class="path-row"><span>打包模式</span><code id="about-frozen">—</code></div>
+              <div class="inline-actions">
+                <button class="btn secondary" id="btn-about-mcp">MCP 配置说明</button>
+                <button class="btn secondary" id="btn-about-skills">Skills 目录</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="modal-root" class="modal-root hidden" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-head">
+          <h2 id="modal-title">标题</h2>
+          <button class="icon-btn" id="modal-close" aria-label="关闭">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6"/></svg>
+          </button>
+        </div>
+        <div class="modal-body" id="modal-body"></div>
+        <div class="modal-actions" id="modal-actions"></div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast-host"></div>
+  </div>
+  <script src="settings.js"></script>
+</body>
+</html>
