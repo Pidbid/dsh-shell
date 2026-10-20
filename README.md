@@ -217,6 +217,21 @@ dist/dsh-shell.exe              Windows Nuitka onefile (PE32+ GUI, x86-64)
 dist/dsh-shell_<version>_amd64.deb
 ```
 
+### Releases
+
+A pushed tag triggers `.github/workflows/build.yml`, which validates that the
+tag matches `dsh_shell/version.py`, lints and tests, builds the Linux onefile +
+DEB and the Windows EXE, and publishes all three as a GitHub release with
+generated release notes:
+
+```bash
+git tag v0.0.1
+git push origin v0.0.1
+```
+
+The tag may be written with or without the leading `v`; build metadata
+(`+...`) is ignored when comparing versions.
+
 ### Linux onefile + DEB
 
 ```bash

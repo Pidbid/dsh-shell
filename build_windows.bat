@@ -17,7 +17,15 @@ if not exist "assets\icon.ico" (
 
 if not exist "dist" mkdir dist
 
-echo Building with Nuitka (onefile)...
+for /f "usebackq delims=" %%v in (`uv run python -c "from dsh_shell.version import __version__; print(__version__)"`) do (
+    if not defined APP_VERSION set "APP_VERSION=%%v"
+)
+if not defined APP_VERSION (
+    echo Could not read the application version from dsh_shell/version.py
+    exit /b 1
+)
+
+echo Building dsh-shell %APP_VERSION% with Nuitka (onefile)...
 uv run nuitka ^
   --mingw64 ^
   --onefile ^
@@ -38,8 +46,8 @@ uv run nuitka ^
   --windows-icon-from-ico=assets\icon.ico ^
   --windows-company-name="dsh-shell" ^
   --windows-product-name="dsh-shell" ^
-  --windows-file-version=0.0.1 ^
-  --windows-product-version=0.0.1 ^
+  --windows-file-version=%APP_VERSION% ^
+  --windows-product-version=%APP_VERSION% ^
   --windows-file-description="DeepSeek Harness desktop shell" ^
   --output-dir=dist ^
   --output-filename=dsh-shell.exe ^
