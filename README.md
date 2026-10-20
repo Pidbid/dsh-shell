@@ -1,111 +1,100 @@
-# dsh-shell
+<div align="right">
 
-Frameless desktop shell for the **DeepSeek Harness** web UI, built with Python 3.12, [uv](https://docs.astral.sh/uv/), and [pywebview](https://pywebview.flowrl.com/).
+[English](README.en.md) · **简体中文**
 
-The shell is deliberately decoupled from the harness:
+</div>
 
-- It talks to `dsh web` only over HTTP.
-- It reuses an existing server on port `3080` (including token-authenticated ones) whenever possible.
-- Otherwise it starts one with `dsh web`, or falls back to `npx` / `pnpm` / `npm`.
-- It can be pointed at any compatible URL with `--url`.
+<p align="center">
+  <img src="assets/icon-128.png" width="88" alt="dsh-shell" />
+</p>
 
-It also manages the two user-facing extension surfaces:
+<h1 align="center">dsh-shell</h1>
 
-- **MCP** — the official profile patch file `$DSH_HOME/profiles/<profile>/cordis.patch.yml`, with `@deepseek-ai/dsh-mcp-client` entries.
-- **Skills** — directory bundles and flat Markdown files under `~/.agents/skills`, with enable/disable, edit, create, and safe delete.
+<p align="center"><b>DeepSeek Harness 的桌面外壳</b> · 无边框窗口、托盘常驻、MCP 与 Skills 一站式管理</p>
 
-## Features
+<p align="center">
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white" />
+  <img alt="pywebview" src="https://img.shields.io/badge/pywebview-6.1%2B-4B8BBE" />
+  <img alt="平台" src="https://img.shields.io/badge/平台-Linux%20%7C%20Windows-6E7681" />
+  <img alt="版本" src="https://img.shields.io/badge/版本-0.0.1-2EA043" />
+</p>
 
-- Frameless main window with square corners, a reserved 34 px top title bar
-  (settings / reload / minimize / maximize-restore / close), and eight HTML
-  resize handles (edges and corners).
-- System tray icon with a right-click menu: show/hide, MCP/Skills settings,
-  reload, open in browser, restart DSH, quit. All platforms use Qt's
-  `QSystemTrayIcon`; on Linux it speaks StatusNotifierItem (GNOME
-  AppIndicators, KDE, XFCE).
-- Single-instance guard: a second launch focuses the first window.
-- MCP form editor plus a raw YAML editor; comments, unknown fields, and `!!js` expressions are preserved.
-- Skills manager with frontmatter editing, model/user invocation flags, enable/disable by moving between `skills` and `skills-disabled`, and move-to-trash deletion.
-- Auth-token discovery from a reused `dsh web` server (environment, runtime record, supervisor logs, `/proc` stdout, journal).
-- Onefile packaging with Nuitka for Linux (DEB) and Windows (EXE).
+<p align="center">
+  <img src="docs/screenshots/main-window.png" alt="dsh-shell 主窗口" width="900" />
+</p>
 
-## Requirements
+## ✨ 特性
 
-- **Python 3.12** and **uv**.
-- Linux: Qt 6 / PySide6 WebEngine (installed by `uv sync`), plus the usual X11/Wayland system libraries.
-- Windows/macOS: PySide6-Essentials (installed by `uv sync`) for the tray icon.
-- Optional: Node.js + `dsh` for auto-starting the harness. If neither is available, reuse an existing server with `--url`.
+- 🪟 **无边框原生外壳**：自绘 34px 标题栏与八向缩放手柄，兼容 X11 / Wayland / Windows。
+- 🔁 **复用已有服务**：优先接管 `127.0.0.1:3080` 上的 `dsh web`（含 Token 鉴权），否则自动拉起或退回 `npx` / `pnpm` / `npm`。
+- 🧩 **MCP 编辑器**：直接编辑官方 `cordis.patch.yml`，保留注释、未知字段与 `!!js` 表达式，表单与原始 YAML 双模式。
+- 🛠️ **Skills 管理器**：目录包与平铺 Markdown 统一管理，支持启用/停用、frontmatter 编辑与安全删除。
+- 🖥️ **托盘常驻**：显示/隐藏、重载、浏览器打开、重启 DSH、退出；无托盘环境自动退化为关闭即退出。
+- 📦 **一键分发包**：Nuitka onefile，Linux 提供 DEB，Windows 提供单一 EXE。
 
-## Development
+## 🖼️ 界面
+
+<p align="center">
+  <img src="docs/screenshots/settings-overview.png" alt="设置 · 概览" width="640" />
+</p>
+
+| MCP 服务器 | Skills |
+| :---: | :---: |
+| ![MCP 管理](docs/screenshots/settings-mcp.png) | ![Skills 管理](docs/screenshots/settings-skills.png) |
+
+## 🚀 快速开始
+
+需要 **Python 3.12** 与 [uv](https://docs.astral.sh/uv/)：
 
 ```bash
 uv sync --group dev
 
-# Frameless window + tray
+# 启动外壳（无边框窗口 + 托盘）
 uv run main.py
 
-# Debug: webview devtools on 127.0.0.1:9229, verbose logs
+# 调试模式：详细日志 + 127.0.0.1:9229 远程调试
 uv run main.py --debug
 
-# Direct mode without a tray process (useful in debuggers)
+# 不启用托盘，直接在调试器里运行
 uv run main.py --no-tray --debug
 
-# Backend smoke test (runtime + MCP + skills)
+# 后端自检（runtime / MCP / skills）
 uv run main.py --smoke-test
-
-# Tests and lint
-uv run pytest
-uv run ruff check .
 ```
 
-Logs are written to `~/.local/share/dsh-shell/logs/dsh-shell.log` (XDG paths on Linux, `%APPDATA%` on Windows).
+已有一个运行中的 `dsh web`？外壳会直接复用；也可以显式指定：
 
-### CLI
-
-```text
---url URL              reuse an explicit dsh web URL (token URLs supported)
---port PORT            preferred dsh web port (default 3080)
---profile NAME         DeepSeek Harness profile (default: web)
---dsh-command CMD      dsh executable/command; the profile name is appended
---no-reuse             do not probe or reuse an existing service
---no-spawn             never start dsh; require --url or an existing service
---no-tray              run the webview without the tray host process
---debug                verbose logs + remote debugging port 9229
---smoke-test           print runtime/MCP/skills status without opening a window
---instance-port PORT   single-instance command socket (default 47831)
+```bash
+uv run main.py --url "http://127.0.0.1:3080/?token=..."
 ```
 
-### Reusing an existing 3080 server
+### ⌨️ 常用参数
 
-`dsh web` prints a URL such as:
+| 参数 | 说明 |
+| --- | --- |
+| `--url URL` | 复用指定的 `dsh web`（支持带 Token 的 URL） |
+| `--port PORT` | 首选 `dsh web` 端口，默认 `3080` |
+| `--profile NAME` | Harness profile，默认 `web` |
+| `--no-reuse` | 不探测、不复用已有服务 |
+| `--no-spawn` | 禁止自动拉起，必须提供 `--url` 或已有服务 |
+| `--no-tray` | 不启动托盘宿主进程 |
+| `--debug` | 详细日志并开启 CDP 调试端口 `9229` |
+| `--smoke-test` | 打印 runtime / MCP / skills 状态后退出 |
 
-```text
-dsh web: http://127.0.0.1:3080/?token=...
-```
+> [!TIP]
+> 服务返回 `401` 时，外壳会依次从环境变量、`runtime.json`、supervisor 日志、`/proc` 与 `journalctl` 中找回 Token，验证通过后才复用。
+>
+> 日志位于 `~/.local/share/dsh-shell/logs/dsh-shell.log`（Windows 为 `%APPDATA%`）。
 
-The shell probes `127.0.0.1:3080`. If it receives `401`, it looks for the current
-token in this order:
+## 🧩 MCP
 
-1. `DSH_WEB_TOKEN` / `DSH_WEB_AUTH_TOKEN`
-2. the shell's own `runtime.json`
-3. supervisor log files (including `stdout_logfile` paths from
-   `/etc/supervisor/conf.d/*.conf`)
-4. `/var/log/supervisor/dsh-web.log`, `~/dsh-web.log`, `~/.dsh/logs/web.log`
-5. the listener process's stdout if it is a regular file
-6. `journalctl -u dsh-web`
-
-The token URL is then verified with a request before it is used. If no token can
-be found, the shell starts its own instance on a free port instead of failing.
-
-## MCP
-
-The official MCP surface of DeepSeek Harness is the profile patch layer:
+Harness 的 MCP 扩展面是 profile 的 patch 层：
 
 ```text
 $DSH_HOME/profiles/<profile>/cordis.patch.yml
 ```
 
-Each server is one loader entry:
+每个服务器是一条 loader 条目：
 
 ```yaml
 - id: mcp-github
@@ -119,176 +108,58 @@ Each server is one loader entry:
       GITHUB_TOKEN: !!js process.env.GITHUB_TOKEN
 ```
 
-The `web` profile sets `patchReload: live`, so saving from the shell applies
-without restarting the harness. The shell:
+保存时保留注释与未触及的 `!!js` 标签，校验 `serverName`、transport、超时等字段，拒绝重复 id / 重复 `serverName`，并以 `.bak` + 原子写入落盘。`web` profile 开启 `patchReload: live`，改完即生效。
 
-- preserves comments, unrelated entries, unknown config keys, and untouched
-  `!!js` tagged scalars;
-- validates `serverName`, transport, stdio `command`, HTTP `url`, timeouts, and
-  reconnect numbers;
-- rejects duplicate ids and duplicate enabled `serverName` values;
-- writes atomically with a `.bak` copy.
+## 🛠️ Skills
 
-The raw YAML editor validates the whole file and writes your exact text.
-
-## Skills
-
-DeepSeek Harness discovers:
-
-- directory bundles: `~/.agents/skills/<name>/SKILL.md`
-- flat files: `~/.agents/skills/<name>.md`
-
-A `SKILL.md` needs YAML frontmatter with `name` (kebab-case) and `description`.
-Optional fields understood by the harness:
-
-```yaml
----
-name: my-skill
-description: What this skill does
-whenToUse: When to reach for it
-disable-model-invocation: true
-user-invocable: false
----
-```
-
-The shell edits these fields while preserving unknown frontmatter keys.
-
-Enable/disable moves the bundle or file to the sibling
-`~/.agents/skills-disabled/` directory, which is outside the scanned root.
-Delete moves the entry to
-`~/.local/share/dsh-shell/trash/skills/<timestamp>/` so it can be restored
-manually. Symlinked entries are listed but never written or moved.
-
-## Frameless window and tray
-
-- A 34 px full-width title bar is reserved above the DSH page (`body` padding +
-  `#root` height), so the shell controls never overlap DSH header/plugin
-  buttons. Drag the title bar to move the window; double-click to toggle
-  maximize.
-- Eight transparent HTML handles resize the window from every edge and corner.
-  The drag/resize IPC uses absolute screen coordinates and is throttled with
-  `requestAnimationFrame`. Starting a resize exits maximized state first.
-- Minimize hides the window (or uses Win32 `SW_MINIMIZE` on Windows); showing a
-  previously maximized window on Linux returns it to the saved normal geometry
-  instead of relying on WM restore.
-- The title bar is always visible: status, settings, reload, minimize,
-  maximize/restore, close. It does not auto-hide.
-- Both windows are opaque and square-cornered; the maximize button switches to a
-  restore icon while the window is maximized.
-- Close / `×` hides to the tray. If the desktop has no tray support, close exits
-  instead (the shell tells the child process that the tray is unavailable).
-- On Linux maximize and minimize are simulated deterministically (resize to the
-  current monitor; hide/show) because Qt's window-state calls are unreliable on
-  Wayland/XWayland. Windows/macOS use native maximize/minimize.
-- `--debug` enables CDP on `127.0.0.1:9229` but does **not** open pywebview's
-  per-window DevTools windows.
-- Tray menu (right-click on Linux): show/hide, MCP/Skills settings, reload, open in browser,
-  restart DSH (owned instances only), quit.
-
-The settings window is a second frameless pywebview window loaded from
-`ui/settings.html`. It shares the same JS API as the main window.
-
-> Linux note: QtWebEngine is forced to software compositing with
-> `QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu --no-sandbox"` because the
-> Vulkan/GBM fallback can hang the renderer on X11/VM hosts. On Wayland desktops
-> with XWayland the shell prefers `QT_QPA_PLATFORM=xcb` for reliable framing and
-> window geometry. pywebview runs with its default private profile to avoid a
-> two-window QWebEngineProfile deadlock; authentication works through the token
-> URL.
->
-> Input methods: the PySide6 wheels only ship the `compose` and `ibus` Qt
-> input-context plugins; the distro fcitx5 plugin is built against the distro Qt
-> and cannot be loaded by the bundled Qt (private-API symbol mismatch). The
-> shell therefore selects `QT_IM_MODULES=ibus` / `QT_IM_MODULE=ibus` when the
-> session asks for fcitx (or sets nothing), and the Linux build bundles the
-> `platforminputcontexts` Qt plugins. When fcitx5 is the session IME it owns
-> `org.freedesktop.IBus` through its IBus frontend, so Chinese/Japanese/Korean
-> input keeps working in the webview.
-
-## Build
-
-### Artifacts
-
-The repository build outputs are:
+Harness 会扫描以下位置：
 
 ```text
-dist/dsh-shell                  Linux Nuitka onefile
-dist/dsh-shell.exe              Windows Nuitka onefile (PE32+ GUI, x86-64)
-dist/dsh-shell_<version>_amd64.deb
+~/.agents/skills/<name>/SKILL.md   # 目录包
+~/.agents/skills/<name>.md         # 平铺文件
 ```
 
-### Releases
+`SKILL.md` 需要包含 `name`（kebab-case）与 `description` 的 YAML frontmatter，可选 `whenToUse`、`disable-model-invocation`、`user-invocable`。停用会把条目移到 `skills-disabled/`，删除则移入 `~/.local/share/dsh-shell/trash/skills/`，随时可以手动找回。
 
-A pushed tag triggers `.github/workflows/build.yml`, which validates that the
-tag matches `dsh_shell/version.py`, lints and tests, builds the Linux onefile +
-DEB and the Windows EXE, and publishes all three as a GitHub release with
-generated release notes:
+## 📦 构建
+
+| 平台 | 命令 | 产物 |
+| --- | --- | --- |
+| Linux | `./build_linux.sh` | `dist/dsh-shell`、`dist/dsh-shell_<version>_amd64.deb` |
+| Windows | `build_windows.bat` | `dist/dsh-shell.exe` |
+
+推送 `v*` 标签会触发 GitHub Actions：校验版本号、跑 lint 与测试、构建三个产物并生成 Release。
 
 ```bash
 git tag v0.0.1
 git push origin v0.0.1
 ```
 
-The tag may be written with or without the leading `v`; build metadata
-(`+...`) is ignored when comparing versions.
-
-### Linux onefile + DEB
+图标由 `scripts/make_icons.py` 从 `assets/icon-source.png` 重新生成：
 
 ```bash
-./build_linux.sh
+uv run python scripts/make_icons.py
 ```
 
-Outputs:
-
-- `dist/dsh-shell` — Nuitka onefile executable
-- `dist/dsh-shell_<version>_amd64.deb`
-
-The DEB installs the onefile binary under `/opt/dsh-shell`, a wrapper at
-`/usr/bin/dsh-shell`, a desktop entry, and hicolor icons.
-
-### Windows onefile EXE
-
-On Windows with `uv` (Nuitka downloads its supported MinGW64 toolchain when MSVC
-is absent):
-
-```bat
-build_windows.bat
-```
-
-Output: `dist\dsh-shell.exe`.
-
-The build includes `ui/` and `assets/` as data directories, PySide6 for the
-tray, the pywebview plugin, pythonnet/CLR loader data, Python package submodules,
-and the application icon.
-The script's smoke test runs `dsh-shell.exe --version`; a built binary was
-verified on Windows 10 (x86-64) with `dsh-shell 0.0.1`.
-
-### Icons
-
-The PNG/ICO assets under `assets/` are committed. To regenerate them from
-`assets/icon-source.png` (Qt-based, no Pillow):
+## 🧪 质量
 
 ```bash
-uv run python scripts/make_icons.py [path-to-source.png]
+uv run pytest        # 测试套件
+uv run ruff check .  # 静态检查
 ```
 
-## Layout
+## 📁 目录结构
 
 ```text
-main.py                     entrypoint, single instance, tray host, child process
+main.py                 入口：单实例、托盘宿主、子进程
 dsh_shell/
-  dsh_runtime.py            reuse/probe/token discovery/spawn/stop
-  mcp_config.py             cordis.patch.yml CRUD + validation
-  skills.py                 ~/.agents/skills discovery + CRUD
-  api.py                    pywebview JS API
-  webview_app.py            windows, chrome injection, command loop, error page
-  tray.py                   Qt system tray menu
-  single_instance.py        lock + local command socket
-  paths.py                  XDG/DSH paths and bundled resources
-ui/
-  chrome.js                 injected overlay pill + drag strip
-  settings.html/css/js      MCP + skills settings window
-tests/                      pytest regression suite
-build_linux.sh              Nuitka onefile + DEB
-build_windows.bat           Nuitka onefile EXE
+  dsh_runtime.py        服务复用 / 探测 / Token 发现 / 启停
+  mcp_config.py         cordis.patch.yml 读写与校验
+  skills.py             Skills 发现与增删改
+  api.py                pywebview JS API
+  webview_app.py        窗口、chrome 注入、命令循环
+  tray.py / single_instance.py / paths.py
+ui/                     标题栏注入脚本与设置界面
+tests/                  pytest 回归套件
+docs/screenshots/       README 截图
 ```
