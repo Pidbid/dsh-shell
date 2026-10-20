@@ -195,6 +195,15 @@ The settings window is a second frameless pywebview window loaded from
 > window geometry. pywebview runs with its default private profile to avoid a
 > two-window QWebEngineProfile deadlock; authentication works through the token
 > URL.
+>
+> Input methods: the PySide6 wheels only ship the `compose` and `ibus` Qt
+> input-context plugins; the distro fcitx5 plugin is built against the distro Qt
+> and cannot be loaded by the bundled Qt (private-API symbol mismatch). The
+> shell therefore selects `QT_IM_MODULES=ibus` / `QT_IM_MODULE=ibus` when the
+> session asks for fcitx (or sets nothing), and the Linux build bundles the
+> `platforminputcontexts` Qt plugins. When fcitx5 is the session IME it owns
+> `org.freedesktop.IBus` through its IBus frontend, so Chinese/Japanese/Korean
+> input keeps working in the webview.
 
 ## Build
 

@@ -54,6 +54,7 @@ if [[ "${DEB_ONLY}" == "0" ]]; then
     --include-package=bottle \
     --include-package=proxy_tools \
     --include-package=qtpy \
+    --include-qt-plugins=platforminputcontexts \
     --include-data-dir=ui=ui \
     --include-data-dir=assets=assets \
     --output-dir="${BUILD_DIR}" \
