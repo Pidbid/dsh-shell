@@ -41,6 +41,29 @@ def _open_path(path: Path) -> bool:
         return False
 
 
+def _make_qt_action_bridge(owner: ShellApi) -> Any:
+    """Build a QObject whose slots can invoke native window actions on Qt's GUI thread."""
+    try:
+        from PySide6.QtCore import QObject, Slot
+    except ImportError:
+        return None
+
+    class _QtWindowActionBridge(QObject):
+        def __init__(self, api: ShellApi) -> None:
+            super().__init__()
+            self._api = api
+
+        @Slot(str, result=bool)
+        def start_resize(self, direction: str) -> bool:
+            return self._api._qt_start_system_resize(direction)
+
+        @Slot(result=bool)
+        def start_move(self) -> bool:
+            return self._api._qt_start_system_move()
+
+    return _QtWindowActionBridge(owner)
+
+
 class ShellApi:
     """Thread-safe bridge between the two webview windows and Python state."""
 
@@ -69,6 +92,7 @@ class ShellApi:
         self._restore_bounds: tuple[int, int, int, int] | None = None
         self._maximized_bounds: tuple[int, int, int, int] | None = None
         self._linux = sys.platform.startswith("linux")
+        self._qt_actions: Any = None
 
     def bind(
         self,
@@ -80,7 +104,9 @@ class ShellApi:
         self._main = main
         self._settings = settings
         self._runtime_error = runtime_error
-        if not self._linux:
+        if self._linux:
+            self._qt_actions = _make_qt_action_bridge(self)
+        else:
             main.events.maximized += self._mark_maximized
             main.events.restored += self._mark_restored
 
@@ -346,6 +372,122 @@ class ShellApi:
             self._maximized_bounds = None
             time.sleep(0.15)
         return self.get_window_bounds()
+
+    def _qt_window_handle(self) -> Any:
+        """Return the native QWindow used by pywebview's Qt backend."""
+        view = self._qt_browser_view()
+        if view is None:
+            return None
+        try:
+            return view.windowHandle()
+        except Exception as error:
+            logger.debug("Could not read the Qt window handle: {}", error)
+            return None
+
+    def _on_qt_gui_thread(self) -> bool:
+        """Best-effort check that avoids touching Qt widgets off the GUI thread."""
+        try:
+            from PySide6.QtCore import QCoreApplication, QThread
+        except ImportError:
+            return threading.current_thread() is threading.main_thread()
+        app = QCoreApplication.instance()
+        if app is None:
+            return threading.current_thread() is threading.main_thread()
+        return QThread.currentThread() is app.thread()
+
+    def _qt_start_system_resize(self, direction: str) -> bool:
+        """Synchronously start native resizing; must run on the Qt GUI thread."""
+        handle = self._qt_window_handle()
+        if handle is None:
+            return False
+        direction = "".join(char for char in str(direction).lower() if char in "nsew")
+        if not direction:
+            return False
+        try:
+            from PySide6.QtCore import Qt
+
+            edges = Qt.Edge(0)
+            if "n" in direction:
+                edges |= Qt.Edge.TopEdge
+            if "s" in direction:
+                edges |= Qt.Edge.BottomEdge
+            if "w" in direction:
+                edges |= Qt.Edge.LeftEdge
+            if "e" in direction:
+                edges |= Qt.Edge.RightEdge
+            if self._linux and self._main_maximized:
+                self._linux_set_maximized(False)
+            return bool(handle.startSystemResize(edges))
+        except Exception as error:
+            logger.debug("Could not start native window resize: {}", error)
+            return False
+
+    def _qt_start_system_move(self) -> bool:
+        """Synchronously start native moving; must run on the Qt GUI thread."""
+        handle = self._qt_window_handle()
+        if handle is None:
+            return False
+        try:
+            if self._linux and self._main_maximized:
+                self._linux_set_maximized(False)
+            return bool(handle.startSystemMove())
+        except Exception as error:
+            logger.debug("Could not start native window move: {}", error)
+            return False
+
+    def _qt_action(self, name: str, *args: Any) -> bool:
+        bridge = self._qt_actions
+        if bridge is None:
+            if self._on_qt_gui_thread():
+                if name == "resize":
+                    return self._qt_start_system_resize(str(args[0]))
+                return self._qt_start_system_move()
+            logger.debug("Native window {} requested before Qt bridge was ready", name)
+            return False
+
+        try:
+            from PySide6.QtCore import Q_ARG, Q_RETURN_ARG, QMetaObject, Qt, QThread
+
+            if bridge.thread() is QThread.currentThread():
+                if name == "resize":
+                    return self._qt_start_system_resize(str(args[0]))
+                return self._qt_start_system_move()
+            slot = "start_resize" if name == "resize" else "start_move"
+            if name == "resize":
+                result = QMetaObject.invokeMethod(
+                    bridge,
+                    slot,
+                    Qt.ConnectionType.BlockingQueuedConnection,
+                    Q_RETURN_ARG(bool),
+                    Q_ARG(str, str(args[0])),
+                )
+            else:
+                result = QMetaObject.invokeMethod(
+                    bridge,
+                    slot,
+                    Qt.ConnectionType.BlockingQueuedConnection,
+                    Q_RETURN_ARG(bool),
+                )
+            return bool(result)
+        except Exception as error:
+            logger.debug("Could not dispatch native window {}: {}", name, error)
+            return False
+
+    def begin_system_resize(self, direction: str) -> bool:
+        """Start a window-manager resize drag from a frameless HTML edge.
+
+        Client-side ``move``/``resize`` loops lose the pointer when it crosses
+        the window boundary and are unreliable on multi-monitor desktops.  Qt's
+        system resize delegates the drag to the window manager, which keeps the
+        pointer captured and handles monitor and compositor-specific geometry.
+        Pywebview calls JS APIs from a worker thread, so this method routes the
+        QWindow call to the GUI thread.
+        """
+        return self._qt_action("resize", direction)
+
+    def begin_system_move(self) -> bool:
+        """Start a window-manager move drag from the frameless title bar."""
+        return self._qt_action("move")
 
     def move_window(self, x: int, y: int) -> bool:
         window = self._main

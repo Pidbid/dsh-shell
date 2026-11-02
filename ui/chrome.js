@@ -92,7 +92,7 @@
     style.textContent = [
       "html body { padding-top: " + BAR_HEIGHT + "px !important; box-sizing: border-box !important; }",
       "#root { height: calc(100vh - " + BAR_HEIGHT + "px) !important; }",
-      ".dsh-resize { position: fixed; z-index: 2147483648; background: transparent; touch-action: none; }",
+      ".dsh-resize { position: fixed; z-index: 2147483647; background: transparent; touch-action: none; }",
       "#dsh-resize-n { top: 0; left: 14px; right: 14px; height: 4px; cursor: ns-resize; }",
       "#dsh-resize-s { bottom: 0; left: 14px; right: 14px; height: 5px; cursor: ns-resize; }",
       "#dsh-resize-w { left: 0; top: 14px; bottom: 14px; width: 5px; cursor: ew-resize; }",
@@ -102,7 +102,7 @@
       "#dsh-resize-sw { bottom: 0; left: 0; width: 14px; height: 14px; cursor: nesw-resize; }",
       "#dsh-resize-se { bottom: 0; right: 0; width: 14px; height: 14px; cursor: nwse-resize; }",
       "#dsh-shell-bar {",
-      "  position: fixed; top: 0; left: 0; right: 0; height: " + BAR_HEIGHT + "px; z-index: 2147483647;",
+      "  position: fixed; top: 0; left: 0; right: 0; height: " + BAR_HEIGHT + "px; z-index: 2147483646;",
       "  box-sizing: border-box; display: flex; align-items: stretch; overflow: hidden;",
       "  color: #182031; background: rgba(250, 251, 253, .97);",
       "  border-bottom: 1px solid rgba(15, 23, 42, .12);",
@@ -213,123 +213,274 @@
     safeCall("set_window_bounds", [latest.x, latest.y, latest.width, latest.height]);
   }
 
+  function capturePointer(target, pointerId) {
+    try {
+      target.setPointerCapture(pointerId);
+    } catch (error) {
+      // Pointer capture is an enhancement; keyboard/old engines may reject it.
+    }
+  }
+
+  function releasePointer(target, pointerId) {
+    try {
+      if (target.hasPointerCapture && target.hasPointerCapture(pointerId)) {
+        target.releasePointerCapture(pointerId);
+      }
+    } catch (error) {
+      // The pointer may already have been released by the compositor.
+    }
+  }
+
   function startResize(event) {
     if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
-    var direction = event.currentTarget.dataset.dir || "";
+    var captureTarget = event.currentTarget;
+    var pointerId = event.pointerId;
+    var direction = captureTarget.dataset.dir || "";
     var startX = event.screenX;
     var startY = event.screenY;
-    safeCall("prepare_resize").then(function (start) {
-      refreshWindowState();
-      if (!start || typeof start.width !== "number" || typeof start.height !== "number") return;
-      var latest = null;
-      var frame = 0;
+    var start = null;
+    var latest = null;
+    var frame = 0;
+    var active = true;
 
-      function flush() {
-        frame = 0;
-        if (!latest) return;
+    function removeListeners() {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      window.removeEventListener("blur", onCancel);
+      captureTarget.removeEventListener("lostpointercapture", onCancel);
+    }
+
+    function cleanup() {
+      if (!active) return;
+      active = false;
+      removeListeners();
+      releasePointer(captureTarget, pointerId);
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+    }
+
+    function flush() {
+      frame = 0;
+      if (!active || !latest) return;
+      var bounds = latest;
+      latest = null;
+      applyResize(bounds);
+    }
+
+    function applyLatest() {
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      if (latest) {
         var bounds = latest;
         latest = null;
         applyResize(bounds);
       }
+    }
 
-      function onMove(moveEvent) {
-        var dx = moveEvent.screenX - startX;
-        var dy = moveEvent.screenY - startY;
-        var x = start.x;
-        var y = start.y;
-        var width = start.width;
-        var height = start.height;
-        if (direction.indexOf("e") !== -1) {
-          width = Math.max(MIN_WIDTH, start.width + dx);
-        }
-        if (direction.indexOf("w") !== -1) {
-          width = Math.max(MIN_WIDTH, start.width - dx);
-          x = start.x + (start.width - width);
-        }
-        if (direction.indexOf("s") !== -1) {
-          height = Math.max(MIN_HEIGHT, start.height + dy);
-        }
-        if (direction.indexOf("n") !== -1) {
-          height = Math.max(MIN_HEIGHT, start.height - dy);
-          y = start.y + (start.height - height);
-        }
-        latest = {
-          x: Math.round(x),
-          y: Math.round(y),
-          width: Math.round(width),
-          height: Math.round(height)
-        };
-        if (!frame) frame = requestAnimationFrame(flush);
+    function onMove(moveEvent) {
+      if (!active) return;
+      if (!(moveEvent.buttons & 1)) {
+        onUp();
+        return;
       }
-
-      function onUp() {
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onUp);
-        window.removeEventListener("pointercancel", onUp);
-        if (frame) cancelAnimationFrame(frame);
-        if (latest) {
-          var bounds = latest;
-          latest = null;
-          applyResize(bounds);
-        }
+      if (!start) return;
+      var dx = moveEvent.screenX - startX;
+      var dy = moveEvent.screenY - startY;
+      var x = start.x;
+      var y = start.y;
+      var width = start.width;
+      var height = start.height;
+      if (direction.indexOf("e") !== -1) {
+        width = Math.max(MIN_WIDTH, start.width + dx);
       }
+      if (direction.indexOf("w") !== -1) {
+        width = Math.max(MIN_WIDTH, start.width - dx);
+        x = start.x + (start.width - width);
+      }
+      if (direction.indexOf("s") !== -1) {
+        height = Math.max(MIN_HEIGHT, start.height + dy);
+      }
+      if (direction.indexOf("n") !== -1) {
+        height = Math.max(MIN_HEIGHT, start.height - dy);
+        y = start.y + (start.height - height);
+      }
+      latest = {
+        x: Math.round(x),
+        y: Math.round(y),
+        width: Math.round(width),
+        height: Math.round(height)
+      };
+      if (!frame) frame = requestAnimationFrame(flush);
+    }
 
-      window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onUp);
-      window.addEventListener("pointercancel", onUp);
+    function onUp() {
+      if (!active) return;
+      applyLatest();
+      cleanup();
+    }
+
+    function onCancel() {
+      latest = null;
+      cleanup();
+    }
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    window.addEventListener("blur", onCancel);
+    captureTarget.addEventListener("lostpointercapture", onCancel);
+    capturePointer(captureTarget, pointerId);
+
+    safeCall("begin_system_resize", [direction]).then(function (started) {
+      if (!active) return;
+      if (started) {
+        cleanup();
+        refreshWindowState();
+        return;
+      }
+      safeCall("prepare_resize").then(function (bounds) {
+        if (!active) return;
+        if (!bounds || typeof bounds.width !== "number" || typeof bounds.height !== "number") {
+          cleanup();
+          return;
+        }
+        start = bounds;
+      }).catch(function (error) {
+        cleanup();
+        toast(String(error), "error");
+      });
     }).catch(function (error) {
+      cleanup();
       toast(String(error), "error");
     });
   }
+
+  var DRAG_THRESHOLD = 4;
 
   function startMove(event) {
     if (event.button !== 0) return;
     if (event.target.closest(".dsh-bar-btn")) return;
     event.preventDefault();
     event.stopPropagation();
+    var captureTarget = event.currentTarget;
+    var pointerId = event.pointerId;
     var startX = event.screenX;
     var startY = event.screenY;
-    safeCall("get_window_bounds").then(function (start) {
-      if (!start || typeof start.x !== "number" || typeof start.y !== "number") return;
-      var latest = null;
-      var frame = 0;
+    var start = null;
+    var latest = null;
+    var lastPointer = { x: startX, y: startY };
+    var frame = 0;
+    var active = true;
+    var nativeRequested = false;
 
-      function flush() {
-        frame = 0;
-        if (!latest) return;
+    function removeListeners() {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      window.removeEventListener("blur", onCancel);
+      captureTarget.removeEventListener("lostpointercapture", onCancel);
+    }
+
+    function cleanup() {
+      if (!active) return;
+      active = false;
+      removeListeners();
+      releasePointer(captureTarget, pointerId);
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+    }
+
+    function flush() {
+      frame = 0;
+      if (!active || !latest) return;
+      var next = latest;
+      latest = null;
+      safeCall("move_window", [next.x, next.y]);
+    }
+
+    function applyLatest() {
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      if (latest) {
         var next = latest;
         latest = null;
         safeCall("move_window", [next.x, next.y]);
       }
+    }
 
-      function onMove(moveEvent) {
-        latest = {
-          x: Math.round(start.x + moveEvent.screenX - startX),
-          y: Math.round(start.y + moveEvent.screenY - startY)
-        };
-        if (!frame) frame = requestAnimationFrame(flush);
-      }
+    function updateLatest() {
+      if (!start) return;
+      latest = {
+        x: Math.round(start.x + lastPointer.x - startX),
+        y: Math.round(start.y + lastPointer.y - startY)
+      };
+      if (!frame) frame = requestAnimationFrame(flush);
+    }
 
-      function onUp() {
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onUp);
-        window.removeEventListener("pointercancel", onUp);
-        if (frame) cancelAnimationFrame(frame);
-        if (latest) {
-          var next = latest;
-          latest = null;
-          safeCall("move_window", [next.x, next.y]);
+    function beginNativeMove() {
+      nativeRequested = true;
+      safeCall("begin_system_move").then(function (started) {
+        if (!active) return;
+        if (started) {
+          cleanup();
+          refreshWindowState();
+          return;
         }
-      }
+        safeCall("get_window_bounds").then(function (bounds) {
+          if (!active) return;
+          if (!bounds || typeof bounds.x !== "number" || typeof bounds.y !== "number") {
+            cleanup();
+            return;
+          }
+          start = bounds;
+          updateLatest();
+        }).catch(function (error) {
+          cleanup();
+          toast(String(error), "error");
+        });
+      }).catch(function (error) {
+        cleanup();
+        toast(String(error), "error");
+      });
+    }
 
-      window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onUp);
-      window.addEventListener("pointercancel", onUp);
-    }).catch(function (error) {
-      toast(String(error), "error");
-    });
+    function onMove(moveEvent) {
+      if (!active) return;
+      if (!(moveEvent.buttons & 1)) {
+        onUp();
+        return;
+      }
+      lastPointer = { x: moveEvent.screenX, y: moveEvent.screenY };
+      if (!nativeRequested) {
+        var dx = lastPointer.x - startX;
+        var dy = lastPointer.y - startY;
+        if (Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return;
+        beginNativeMove();
+        return;
+      }
+      updateLatest();
+    }
+
+    function onUp() {
+      if (!active) return;
+      applyLatest();
+      cleanup();
+    }
+
+    function onCancel() {
+      latest = null;
+      cleanup();
+    }
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    window.addEventListener("blur", onCancel);
+    captureTarget.addEventListener("lostpointercapture", onCancel);
+    capturePointer(captureTarget, pointerId);
   }
 
   function installResizeZones() {
