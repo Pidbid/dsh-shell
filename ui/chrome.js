@@ -23,6 +23,49 @@
     }
   }
 
+  var ACTIVITY_SELECTOR = '[data-row-key^="session:"] [data-state="ongoing"], [data-chat-running]';
+  var activityLast = null;
+  var activityObserver = null;
+  var activityTimer = null;
+
+  function hasActivityBridge() {
+    var bridge = api();
+    return !!(bridge && typeof bridge.report_session_activity === "function");
+  }
+
+  function detectSessionActivity() {
+    return !!document.querySelector(ACTIVITY_SELECTOR);
+  }
+
+  function checkSessionActivity() {
+    if (!document.documentElement || !hasActivityBridge()) return;
+    var active = detectSessionActivity();
+    if (activityLast === active) return;
+    activityLast = active;
+    safeCall("report_session_activity", [active]).catch(function () {});
+  }
+
+  function installActivityWatcher() {
+    if (!document.documentElement) return;
+    if (!activityObserver && typeof MutationObserver === "function") {
+      activityObserver = new MutationObserver(checkSessionActivity);
+      activityObserver.observe(document.documentElement, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ["data-state", "data-chat-running", "data-row-key"]
+      });
+    }
+    if (!activityTimer) {
+      activityTimer = setInterval(checkSessionActivity, 2000);
+    }
+    if (!window.__dshShellActivityReadyListener) {
+      window.__dshShellActivityReadyListener = true;
+      window.addEventListener("pywebviewready", checkSessionActivity);
+    }
+    checkSessionActivity();
+  }
+
   function toast(message, kind) {
     var host = document.getElementById("dsh-shell-toast");
     if (!host) {
@@ -388,6 +431,7 @@
       setTimeout(boot, 40);
       return;
     }
+    installActivityWatcher();
     installBar();
   }
 

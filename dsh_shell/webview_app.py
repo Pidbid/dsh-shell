@@ -22,6 +22,7 @@ from .ipc import (
     QUIT,
     RELOAD,
     RESTART_DSH,
+    SESSION_ACTIVITY,
     SHOW_MAIN,
     TOGGLE_MAIN,
     TRAY_UNAVAILABLE,
@@ -238,7 +239,7 @@ def _command_loop(
                 pass
 
 
-def run_webview_process(config: dict[str, Any], commands: Any) -> int:
+def run_webview_process(config: dict[str, Any], commands: Any, activity_events: Any = None) -> int:
     ensure_data_dirs()
     webview.settings["ALLOW_DOWNLOADS"] = True
     webview.settings["ALLOW_FILE_URLS"] = True
@@ -283,7 +284,21 @@ def run_webview_process(config: dict[str, Any], commands: Any) -> int:
         except Exception:
             quit_event.set()
 
-    api = ShellApi(runtime, mcp, skills, request_quit=request_quit)
+    def on_session_activity(active: bool) -> None:
+        if activity_events is None:
+            return
+        try:
+            activity_events.put((SESSION_ACTIVITY, bool(active)))
+        except Exception as error:
+            logger.warning("Could not publish session activity: {}", error)
+
+    api = ShellApi(
+        runtime,
+        mcp,
+        skills,
+        request_quit=request_quit,
+        on_session_activity=on_session_activity,
+    )
 
     main = webview.create_window(
         "DeepSeek Harness",

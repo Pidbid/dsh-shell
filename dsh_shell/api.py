@@ -51,11 +51,14 @@ class ShellApi:
         skills: SkillsManager,
         *,
         request_quit: Callable[[], None] | None = None,
+        on_session_activity: Callable[[bool], None] | None = None,
     ) -> None:
         self.runtime = runtime
         self.mcp = mcp
         self.skills = skills
         self._request_quit = request_quit
+        self._on_session_activity = on_session_activity
+        self._session_active: bool | None = None
         self._main: webview.Window | None = None
         self._settings: webview.Window | None = None
         self._lock = threading.RLock()
@@ -269,6 +272,22 @@ class ShellApi:
     def open_skill_dir(self, skill_id: str) -> bool:
         record = self.skills.read(skill_id)["skill"]
         return _open_path(Path(record["directory"]))
+
+    # ------------------------------------------------------------------ session activity
+    def report_session_activity(self, active: bool) -> bool:
+        """Record frontend session activity and notify the host only on changes."""
+        normalized = bool(active)
+        with self._lock:
+            if normalized == self._session_active:
+                return normalized
+            self._session_active = normalized
+            callback = self._on_session_activity
+            if callback is not None:
+                try:
+                    callback(normalized)
+                except Exception as error:
+                    logger.warning("Session activity callback failed: {}", error)
+        return normalized
 
     # ------------------------------------------------------------------ windows
     def get_window_bounds(self) -> dict[str, int] | None:

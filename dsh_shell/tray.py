@@ -8,6 +8,8 @@ extension renders and which Wayland desktops host (unlike XEmbed).
 
 from __future__ import annotations
 
+import math
+import queue
 import threading
 from collections.abc import Callable
 from typing import Any
@@ -20,9 +22,72 @@ from .ipc import (
     QUIT,
     RELOAD,
     RESTART_DSH,
+    SESSION_ACTIVITY,
     TOGGLE_MAIN,
 )
 from .paths import APP_DISPLAY_NAME, icon_path
+
+ACTIVE_TOOLTIP = f"{APP_DISPLAY_NAME} · 会话运行中"
+ACTIVITY_FRAME_COUNT = 12
+ACTIVITY_FRAME_INTERVAL_MS = 120
+ACTIVITY_POLL_INTERVAL_MS = 80
+
+
+def generate_activity_frames(frame_count: int = ACTIVITY_FRAME_COUNT) -> list[Any]:
+    """Render rotating/pulsing activity-ring frames over the static tray icon."""
+    if frame_count < 1:
+        raise ValueError("frame_count must be positive")
+
+    from PySide6.QtCore import QRectF, Qt
+    from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+
+    base = QPixmap(str(icon_path()))
+    if base.isNull():
+        return []
+
+    size = min(base.width(), base.height())
+    if size <= 0:
+        return []
+
+    ring_width = max(2.0, size * 0.065)
+    inset = ring_width / 2 + max(1.0, size * 0.015)
+    ring_rect = QRectF(inset, inset, size - inset * 2, size - inset * 2)
+    track_color = QColor(75, 107, 245, 95)
+    accent_color = QColor(75, 107, 245, 255)
+
+    frames: list[Any] = []
+    for frame_index in range(frame_count):
+        canvas = base.copy()
+        painter = QPainter(canvas)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setPen(
+                QPen(
+                    track_color,
+                    ring_width,
+                    Qt.PenStyle.SolidLine,
+                    Qt.PenCapStyle.RoundCap,
+                )
+            )
+            painter.drawEllipse(ring_rect)
+
+            phase = frame_index / frame_count
+            pulse = (math.sin(phase * math.tau) + 1.0) / 2.0
+            sweep = 92.0 + pulse * 34.0
+            start_angle = int((90.0 - frame_index * 360.0 / frame_count) * 16)
+            painter.setPen(
+                QPen(
+                    accent_color,
+                    ring_width * (0.78 + pulse * 0.22),
+                    Qt.PenStyle.SolidLine,
+                    Qt.PenCapStyle.RoundCap,
+                )
+            )
+            painter.drawArc(ring_rect, start_angle, int(-sweep * 16))
+        finally:
+            painter.end()
+        frames.append(QIcon(canvas))
+    return frames
 
 
 class TrayHost:
@@ -34,14 +99,22 @@ class TrayHost:
         *,
         on_quit: Callable[[], None],
         ensure_child: Callable[[], None] | None = None,
+        activity_events: Any = None,
     ) -> None:
         self._send = send
         self._on_quit = on_quit
         self._ensure_child = ensure_child
+        self._activity_events = activity_events
         self._qt_app: Any = None
         self._qt_tray: Any = None
         self._qt_menu: Any = None
         self._quit_bridge: Any = None
+        self._activity_timer: Any = None
+        self._activity_poll_timer: Any = None
+        self._activity_frames: list[Any] | None = None
+        self._activity_frame_index = 0
+        self._static_icon: Any = None
+        self._session_active = False
         self._lock = threading.Lock()
         self._quit_requested = False
 
@@ -82,15 +155,100 @@ class TrayHost:
         finally:
             self.stop()
 
+    def _static_qicon(self) -> Any:
+        if self._static_icon is None:
+            from PySide6.QtGui import QIcon
+
+            self._static_icon = QIcon(str(icon_path()))
+        return self._static_icon
+
+    def _ensure_activity_frames(self) -> list[Any]:
+        if self._activity_frames is None:
+            try:
+                self._activity_frames = generate_activity_frames()
+            except Exception as error:
+                logger.warning("Could not render tray activity animation: {}", error)
+                self._activity_frames = []
+        return self._activity_frames
+
+    def _set_session_active(self, active: bool) -> None:
+        """Apply the session-running state; called by the Qt-thread event poller."""
+        active = bool(active)
+        if active and self._session_active:
+            return
+        self._session_active = active
+
+        tray = self._qt_tray
+        if active:
+            frames = self._ensure_activity_frames()
+            self._activity_frame_index = 0
+            if tray is not None and frames:
+                tray.setIcon(frames[0])
+                tray.setToolTip(ACTIVE_TOOLTIP)
+            elif tray is not None:
+                tray.setToolTip(ACTIVE_TOOLTIP)
+            timer = self._activity_timer
+            if timer is not None and frames:
+                timer.start()
+            return
+
+        timer = self._activity_timer
+        if timer is not None:
+            timer.stop()
+        self._activity_frame_index = 0
+        if tray is not None:
+            tray.setIcon(self._static_qicon())
+            tray.setToolTip(APP_DISPLAY_NAME)
+
+    def _advance_activity_frame(self) -> None:
+        if not self._session_active:
+            return
+        frames = self._activity_frames
+        tray = self._qt_tray
+        if not frames or tray is None:
+            return
+        self._activity_frame_index = (self._activity_frame_index + 1) % len(frames)
+        tray.setIcon(frames[self._activity_frame_index])
+
+    def _poll_activity(self) -> None:
+        """Drain session activity events; must run on the Qt main thread."""
+        events = self._activity_events
+        if events is None:
+            return
+        while True:
+            try:
+                event = events.get_nowait()
+            except queue.Empty:
+                return
+            except (EOFError, OSError, ValueError) as error:
+                logger.debug("Tray activity queue unavailable: {}", error)
+                return
+            if not isinstance(event, tuple) or len(event) < 2:
+                continue
+            kind, value = event[0], event[1]
+            if kind == SESSION_ACTIVITY:
+                self._set_session_active(bool(value))
+
+    def _stop_activity_timers(self) -> None:
+        for timer in (self._activity_poll_timer, self._activity_timer):
+            if timer is None:
+                continue
+            try:
+                timer.stop()
+            except Exception as error:
+                logger.debug("Qt tray timer stop failed: {}", error)
+
     def stop(self) -> None:
         bridge = self._quit_bridge
         if bridge is None:
+            self._stop_activity_timers()
             return
         try:
-            # Queued signal: safe to emit from the monitor thread.
+            # Queued signal: stops timers in the Qt thread and exits its loop.
             bridge.requested.emit()
         except Exception as error:
             logger.debug("Qt tray stop failed: {}", error)
+            self._stop_activity_timers()
 
     def notify(self, message: str, title: str = APP_DISPLAY_NAME) -> None:
         tray = self._qt_tray
@@ -104,7 +262,7 @@ class TrayHost:
     # --------------------------------------------------------------------- Qt
     def _run_qt(self) -> bool:
         try:
-            from PySide6.QtCore import QObject, Qt, Signal
+            from PySide6.QtCore import QObject, Qt, QTimer, Signal
             from PySide6.QtGui import QIcon
             from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
         except Exception as error:
@@ -122,7 +280,8 @@ class TrayHost:
         class _QuitBridge(QObject):
             requested = Signal()
 
-        tray = QSystemTrayIcon(QIcon(str(icon_path())), app)
+        self._static_icon = QIcon(str(icon_path()))
+        tray = QSystemTrayIcon(self._static_icon, app)
         tray.setToolTip(APP_DISPLAY_NAME)
         menu = QMenu()
         for label, handler in (
@@ -148,13 +307,29 @@ class TrayHost:
 
         tray.activated.connect(on_activated)
 
+        activity_timer = QTimer()
+        activity_timer.setInterval(ACTIVITY_FRAME_INTERVAL_MS)
+        activity_timer.timeout.connect(self._advance_activity_frame)
+
+        activity_poll_timer = QTimer()
+        activity_poll_timer.setInterval(ACTIVITY_POLL_INTERVAL_MS)
+        activity_poll_timer.timeout.connect(self._poll_activity)
+        activity_poll_timer.start()
+
         bridge = _QuitBridge()
-        bridge.requested.connect(app.quit, Qt.ConnectionType.QueuedConnection)
+
+        def request_shutdown() -> None:
+            self._stop_activity_timers()
+            app.quit()
+
+        bridge.requested.connect(request_shutdown, Qt.ConnectionType.QueuedConnection)
 
         self._qt_app = app
         self._qt_tray = tray
         self._qt_menu = menu
         self._quit_bridge = bridge
+        self._activity_timer = activity_timer
+        self._activity_poll_timer = activity_poll_timer
         tray.show()
         logger.info("System tray icon started (Qt)")
         try:
@@ -164,6 +339,9 @@ class TrayHost:
             logger.warning("Qt tray loop failed: {}", error)
             return False
         finally:
+            self._stop_activity_timers()
+            self._activity_timer = None
+            self._activity_poll_timer = None
             self._quit_bridge = None
             self._qt_tray = None
             self._qt_app = None

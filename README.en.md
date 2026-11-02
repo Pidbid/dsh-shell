@@ -29,7 +29,7 @@
 - 🔁 **Reuse before spawn** — takes over an existing `dsh web` on `127.0.0.1:3080` (token-auth included), otherwise spawns one, falling back to `npx` / `pnpm` / `npm`.
 - 🧩 **MCP editor** — edits the official `cordis.patch.yml` while preserving comments, unknown keys and `!!js` expressions; form and raw YAML modes.
 - 🛠️ **Skills manager** — directory bundles and flat Markdown, with enable/disable, frontmatter editing and safe deletion.
-- 🖥️ **Tray resident** — show/hide, reload, open in browser, restart DSH, quit; degrades to close-to-quit when no tray exists.
+- 🖥️ **Tray resident** — show/hide, reload, open in browser, restart DSH, quit; the tray icon animates while a Session is running and degrades to close-to-quit when no tray exists.
 - 📦 **One-click packaging** — Nuitka onefile: DEB on Linux, a single EXE on Windows.
 
 ## 🖼️ Screenshots

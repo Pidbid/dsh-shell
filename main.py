@@ -63,7 +63,7 @@ def _config_from_args(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def _webview_child(config: dict[str, Any], commands: Any) -> None:
+def _webview_child(config: dict[str, Any], commands: Any, activity_events: Any) -> None:
     setup_logging(
         bool(config.get("debug", False)),
         console=bool(config.get("debug", False)) or not _is_frozen(),
@@ -71,7 +71,7 @@ def _webview_child(config: dict[str, Any], commands: Any) -> None:
     from dsh_shell.webview_app import run_webview_process
 
     try:
-        run_webview_process(config, commands)
+        run_webview_process(config, commands, activity_events)
     except Exception:
         logger.exception("Webview process crashed")
         raise
@@ -156,6 +156,7 @@ def run_smoke(config: dict[str, Any]) -> int:
 def _start_tray(config: dict[str, Any], instance: SingleInstance) -> int:
     ctx = multiprocessing.get_context("spawn")
     commands = ctx.Queue()
+    activity_events = ctx.Queue()
     child_lock = threading.Lock()
     child: multiprocessing.Process | None = None
     quitting = threading.Event()
@@ -163,7 +164,7 @@ def _start_tray(config: dict[str, Any], instance: SingleInstance) -> int:
     def start_child() -> multiprocessing.Process:
         process = ctx.Process(
             target=_webview_child,
-            args=(config, commands),
+            args=(config, commands, activity_events),
             name="dsh-shell-webview",
             daemon=False,
         )
@@ -189,7 +190,12 @@ def _start_tray(config: dict[str, Any], instance: SingleInstance) -> int:
     ensure_child()
     assert child is not None
 
-    tray = TrayHost(send, on_quit=on_quit, ensure_child=ensure_child)
+    tray = TrayHost(
+        send,
+        on_quit=on_quit,
+        ensure_child=ensure_child,
+        activity_events=activity_events,
+    )
 
     def hard_exit() -> None:
         _cleanup_owned_dsh()
@@ -244,15 +250,17 @@ def _start_tray(config: dict[str, Any], instance: SingleInstance) -> int:
             process.terminate()
             process.join(timeout=5)
             _cleanup_owned_dsh()
-    try:
-        commands.close()
-    except Exception:
-        pass
+    for command_queue in (commands, activity_events):
+        try:
+            command_queue.close()
+        except Exception:
+            pass
     return 0
 
 
 def _run_direct(config: dict[str, Any], instance: SingleInstance) -> int:
     commands: queue.Queue[str] = queue.Queue()
+    activity_events: queue.Queue[tuple[str, bool]] = queue.Queue()
     commands.put(TRAY_UNAVAILABLE)
 
     def instance_command(command: str) -> None:
@@ -263,7 +271,7 @@ def _run_direct(config: dict[str, Any], instance: SingleInstance) -> int:
     from dsh_shell.webview_app import run_webview_process
 
     try:
-        return run_webview_process(config, commands)
+        return run_webview_process(config, commands, activity_events)
     finally:
         instance.close()
 
