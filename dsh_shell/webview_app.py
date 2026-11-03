@@ -32,6 +32,95 @@ from .paths import ensure_data_dirs, icon_path, resource_path
 from .skills import SkillsManager
 from .version import __version__
 
+_CLIPBOARD_PERMISSION_HANDLER_ATTR = "_dsh_shell_clipboard_permission_handler"
+
+
+def install_clipboard_permission(window: webview.Window) -> bool:
+    """Grant QtWebEngine permission for the DSH page to write the clipboard.
+
+    pywebview's Qt backend denies every feature permission except media
+    capture. Chromium asks for ``ClipboardReadWrite`` when the web UI calls
+    ``navigator.clipboard.writeText()``; the conversation copy buttons then
+    fail without ever reaching their ``execCommand`` fallback.
+    """
+    try:
+        from PySide6.QtWebEngineCore import QWebEnginePage
+    except ImportError:
+        return False
+
+    page_getter = getattr(getattr(getattr(window, "native", None), "webview", None), "page", None)
+    if not callable(page_getter):
+        return False
+    try:
+        page = page_getter()
+    except Exception as error:
+        logger.debug("Could not read Qt web page for clipboard permission: {}", error)
+        return False
+    if page is None:
+        return False
+    if getattr(page, _CLIPBOARD_PERMISSION_HANDLER_ATTR, None) is not None:
+        return True
+
+    def grant_clipboard_permission(url: Any, feature: Any) -> None:
+        if feature != QWebEnginePage.Feature.ClipboardReadWrite:
+            return
+        try:
+            page.setFeaturePermission(
+                url,
+                feature,
+                QWebEnginePage.PermissionPolicy.PermissionGrantedByUser,
+            )
+            logger.debug("Granted QtWebEngine clipboard write permission")
+        except Exception as error:
+            logger.warning("Could not grant QtWebEngine clipboard permission: {}", error)
+
+    try:
+        page.featurePermissionRequested.connect(grant_clipboard_permission)
+    except Exception as error:
+        logger.warning("Could not watch QtWebEngine feature permissions: {}", error)
+        return False
+    setattr(page, _CLIPBOARD_PERMISSION_HANDLER_ATTR, grant_clipboard_permission)
+    return True
+
+
+def _make_clipboard_permission_installer(window: webview.Window) -> Any:
+    """Build a QObject slot that installs the permission handler on Qt's thread."""
+    if not sys.platform.startswith("linux"):
+        # Only the Linux backend uses Qt WebEngine. Constructing a QObject and
+        # blocking on its thread on WebView2/Cocoa would never be serviced.
+        return None
+    try:
+        from PySide6.QtCore import QObject, Slot
+    except ImportError:
+        return None
+
+    class _ClipboardPermissionInstaller(QObject):
+        @Slot(result=bool)
+        def install(self) -> bool:
+            return install_clipboard_permission(window)
+
+    return _ClipboardPermissionInstaller()
+
+
+def _request_clipboard_permission_install(installer: Any) -> None:
+    """Invoke a clipboard installer from pywebview's loaded-event worker thread."""
+    if installer is None:
+        return
+    try:
+        from PySide6.QtCore import Q_RETURN_ARG, QMetaObject, Qt, QThread
+
+        if installer.thread() is QThread.currentThread():
+            installer.install()
+            return
+        QMetaObject.invokeMethod(
+            installer,
+            "install",
+            Qt.ConnectionType.BlockingQueuedConnection,
+            Q_RETURN_ARG(bool),
+        )
+    except Exception as error:
+        logger.debug("Could not install clipboard permission on the Qt thread: {}", error)
+
 
 def build_chrome_script() -> str:
     path = resource_path("ui", "chrome.js")
@@ -137,10 +226,13 @@ def _wire_window_events(
         except Exception as error:
             logger.warning("Could not inject shell chrome: {}", error)
 
+    clipboard_installer = _make_clipboard_permission_installer(main)
+
     def on_loaded() -> None:
         # The document can finish loading before pywebview's bridge is ready; the
         # injected script itself waits for `pywebviewready`.
         threading.Timer(0.25, inject).start()
+        _request_clipboard_permission_install(clipboard_installer)
 
     main.events.loaded += on_loaded
 
