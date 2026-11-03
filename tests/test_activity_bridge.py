@@ -116,7 +116,9 @@ class _FakeShellApi:
         pass
 
 
-def test_run_webview_process_bridges_activity_events_to_queue(monkeypatch: Any) -> None:
+def test_run_webview_process_bridges_activity_events_to_queue(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
     commands: queue.Queue[Any] = queue.Queue()
     activity_events: queue.Queue[Any] = queue.Queue()
     windows: list[_FakeWindow] = []
@@ -131,8 +133,8 @@ def test_run_webview_process_bridges_activity_events_to_queue(monkeypatch: Any) 
     monkeypatch.setattr(webview_app, "McpConfigManager", lambda **kwargs: SimpleNamespace())
     monkeypatch.setattr(webview_app, "SkillsManager", lambda: SimpleNamespace())
     monkeypatch.setattr(webview_app, "ShellApi", _FakeShellApi)
-    monkeypatch.setattr(webview_app, "resource_path", lambda *parts: Path("/tmp/dsh-shell-test"))
-    monkeypatch.setattr(webview_app, "icon_path", lambda: Path("/tmp/dsh-shell-test/icon.png"))
+    monkeypatch.setattr(webview_app, "resource_path", lambda *parts: tmp_path / "dsh-shell-test")
+    monkeypatch.setattr(webview_app, "icon_path", lambda: tmp_path / "dsh-shell-test" / "icon.png")
     monkeypatch.setattr(webview_app.webview, "settings", {})
     monkeypatch.setattr(webview_app.webview, "create_window", create_window)
     monkeypatch.setattr(webview_app.webview, "start", lambda **kwargs: None)
@@ -147,7 +149,9 @@ def test_run_webview_process_bridges_activity_events_to_queue(monkeypatch: Any) 
     assert activity_events.get_nowait() == (ipc.SESSION_ACTIVITY, False)
 
 
-def test_run_webview_process_activity_callback_ignores_queue_failure(monkeypatch: Any) -> None:
+def test_run_webview_process_activity_callback_ignores_queue_failure(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
     class BrokenQueue:
         def put(self, item: Any) -> None:
             raise RuntimeError("queue closed")
@@ -164,8 +168,8 @@ def test_run_webview_process_activity_callback_ignores_queue_failure(monkeypatch
     monkeypatch.setattr(webview_app, "McpConfigManager", lambda **kwargs: SimpleNamespace())
     monkeypatch.setattr(webview_app, "SkillsManager", lambda: SimpleNamespace())
     monkeypatch.setattr(webview_app, "ShellApi", _FakeShellApi)
-    monkeypatch.setattr(webview_app, "resource_path", lambda *parts: Path("/tmp/dsh-shell-test"))
-    monkeypatch.setattr(webview_app, "icon_path", lambda: Path("/tmp/dsh-shell-test/icon.png"))
+    monkeypatch.setattr(webview_app, "resource_path", lambda *parts: tmp_path / "dsh-shell-test")
+    monkeypatch.setattr(webview_app, "icon_path", lambda: tmp_path / "dsh-shell-test" / "icon.png")
     monkeypatch.setattr(webview_app.webview, "settings", {})
     monkeypatch.setattr(webview_app.webview, "create_window", create_window)
     monkeypatch.setattr(webview_app.webview, "start", lambda **kwargs: None)

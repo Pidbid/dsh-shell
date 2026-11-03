@@ -135,3 +135,34 @@ def test_resize_handles_stay_above_title_bar() -> None:
     assert "z-index: 2147483647; background: transparent" in script
     assert "z-index: 2147483646;" in script
     assert "2147483648" not in script
+
+
+def test_window_actions_define_animations_for_all_transition_states() -> None:
+    script = CHROME_JS.read_text(encoding="utf-8")
+
+    for animation in (
+        "dsh-window-anim-maximize",
+        "dsh-window-anim-restore",
+        "dsh-window-anim-minimize",
+        "dsh-window-anim-close",
+    ):
+        assert animation in script
+    for keyframe in (
+        "dsh-window-maximize-in",
+        "dsh-window-restore-in",
+        "dsh-window-minimize-out",
+        "dsh-window-close-out",
+    ):
+        assert keyframe in script
+    assert "prefers-reduced-motion: reduce" in script
+    assert "animationend" in script
+    assert 'window.addEventListener("resize", refreshWindowStateSoon)' in script
+    assert 'window.addEventListener("focus", refreshWindowState)' in script
+
+
+def test_window_action_buttons_use_animated_transition_path() -> None:
+    script = CHROME_JS.read_text(encoding="utf-8")
+
+    assert 'invokeWindowAction(action, action)' in script
+    assert 'invokeWindowAction("toggle_maximize", maximizedState ? "restore" : "maximize")' in script
+    assert 'safeCall("main_action", ["toggle_maximize"])' not in script

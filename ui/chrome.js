@@ -129,7 +129,23 @@
       ".dsh-bar-btn:hover { opacity: 1; background: rgba(15, 23, 42, .07); }",
       "@media (prefers-color-scheme: dark) { .dsh-bar-btn:hover { background: rgba(255,255,255,.09); } }",
       ".dsh-bar-btn.close:hover { background: #e5484d; color: #fff; opacity: 1; }",
-      ".dsh-bar-btn svg { width: 13px; height: 13px; display: block; }",
+      ".dsh-bar-btn svg { width: 13px; height: 13px; display: block; transition: transform .16s cubic-bezier(.2,.8,.2,1); }",
+      ".dsh-bar-btn[data-action=\"minimize\"]:active svg { transform: translateY(2px) scaleX(1.18); }",
+      ".dsh-bar-btn[data-action=\"toggle_maximize\"]:active svg { transform: scale(1.12); }",
+      ".dsh-bar-btn[data-action=\"close\"]:active svg { transform: rotate(90deg) scale(.88); }",
+      "#root, #dsh-shell-bar { transform-origin: 50% 50%; will-change: opacity, transform; }",
+      "html.dsh-window-anim-maximize #root, html.dsh-window-anim-maximize #dsh-shell-bar {",
+      "  animation: dsh-window-maximize-in .2s cubic-bezier(.2,.8,.2,1) both; }",
+      "html.dsh-window-anim-restore #root, html.dsh-window-anim-restore #dsh-shell-bar {",
+      "  animation: dsh-window-restore-in .2s cubic-bezier(.2,.8,.2,1) both; }",
+      "html.dsh-window-anim-minimize #root, html.dsh-window-anim-minimize #dsh-shell-bar {",
+      "  animation: dsh-window-minimize-out .16s ease-in both; }",
+      "html.dsh-window-anim-close #root, html.dsh-window-anim-close #dsh-shell-bar {",
+      "  animation: dsh-window-close-out .17s ease-in both; }",
+      "@keyframes dsh-window-maximize-in { from { opacity: .84; transform: scale(.975); } to { opacity: 1; transform: scale(1); } }",
+      "@keyframes dsh-window-restore-in { from { opacity: .84; transform: scale(1.012); } to { opacity: 1; transform: scale(1); } }",
+      "@keyframes dsh-window-minimize-out { to { opacity: 0; transform: translateY(16px) scale(.985); } }",
+      "@keyframes dsh-window-close-out { to { opacity: 0; transform: scale(.96); } }",
       "#dsh-shell-toast { position: fixed; right: 18px; bottom: 18px; z-index: 2147483647; display: flex; flex-direction: column;",
       "  gap: 8px; max-width: min(380px, calc(100vw - 36px)); pointer-events: none; }",
       ".dsh-shell-toast-item { padding: 10px 13px; border-radius: 10px; font: 12px/1.45 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;",
@@ -141,6 +157,7 @@
       "@keyframes dsh-toast-in { to { opacity: 1; transform: translateY(0); } }",
       "@keyframes dsh-toast-out { to { opacity: 0; transform: translateY(4px); } }",
       "@media (prefers-reduced-motion: reduce) { #dsh-shell-bar { transition: none; }",
+      "  #root, #dsh-shell-bar, .dsh-bar-btn svg { animation: none !important; transition: none !important; }",
       "  .dsh-shell-toast-item, .dsh-shell-toast-item.leaving { animation: none; opacity: 1; transform: none; } }"
     ].join("\n");
     (document.head || document.documentElement).appendChild(style);
@@ -163,6 +180,98 @@
 
   var MAXIMIZE_PATH = "M4 4h8v8H4z";
   var RESTORE_PATH = "M6 3.5h6.5V10 M3.5 6.5H10V13H3.5z";
+  var WINDOW_ANIM_CLASSES = [
+    "dsh-window-anim-maximize",
+    "dsh-window-anim-restore",
+    "dsh-window-anim-minimize",
+    "dsh-window-anim-close"
+  ];
+  var maximizedState = false;
+  var windowActionBusy = false;
+
+  function clearWindowAnimation() {
+    var root = document.documentElement;
+    if (!root) return;
+    WINDOW_ANIM_CLASSES.forEach(function (className) {
+      root.classList.remove(className);
+    });
+  }
+
+  function prefersReducedMotion() {
+    return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
+
+  function runWindowAnimation(kind, done) {
+    var root = document.documentElement;
+    var bar = document.getElementById(BAR_ID);
+    clearWindowAnimation();
+    if (!root || prefersReducedMotion()) {
+      done();
+      return;
+    }
+
+    // Reflow before adding the class so repeated actions restart the animation.
+    void root.offsetWidth;
+    root.classList.add("dsh-window-anim-" + kind);
+    var finished = false;
+    var timer = setTimeout(finish, 240);
+
+    function finish() {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      if (bar) bar.removeEventListener("animationend", finish);
+      done();
+    }
+
+    // #dsh-shell-bar is always present in the animated window and its
+    // animation has the same duration as #root; use it as the completion cue.
+    if (bar) bar.addEventListener("animationend", finish);
+  }
+
+  function invokeWindowAction(action, kind) {
+    if (windowActionBusy) return;
+    windowActionBusy = true;
+    var exiting = kind === "minimize" || kind === "close";
+
+    function finish(error) {
+      clearWindowAnimation();
+      windowActionBusy = false;
+      if (error) toast(String(error), "error");
+    }
+
+    function callBridge() {
+      safeCall("main_action", [action]).then(function (result) {
+        if (result === false) {
+          finish();
+          return;
+        }
+        if (exiting) {
+          finish();
+        } else {
+          requestAnimationFrame(function () {
+            runWindowAnimation(kind, function () {
+              clearWindowAnimation();
+              windowActionBusy = false;
+            });
+          });
+        }
+        refreshWindowState();
+      }).catch(finish);
+    }
+
+    if (exiting) {
+      // Keep the exit animation visible while main_action hides the window,
+      // then clear the class so the next tray restore starts fully opaque.
+      runWindowAnimation(kind, callBridge);
+    } else {
+      callBridge();
+    }
+  }
+
+  function toggleMaximize() {
+    invokeWindowAction("toggle_maximize", maximizedState ? "restore" : "maximize");
+  }
 
   function button(action, label, path, extraClass) {
     var btn = document.createElement("button");
@@ -184,6 +293,14 @@
         safeCall("main_action", ["reload"]).catch(function (error) { toast(String(error), "error"); });
         return;
       }
+      if (action === "toggle_maximize") {
+        toggleMaximize();
+        return;
+      }
+      if (action === "minimize" || action === "close") {
+        invokeWindowAction(action, action);
+        return;
+      }
       safeCall("main_action", [action])
         .then(refreshWindowState)
         .catch(function (error) { toast(String(error), "error"); });
@@ -192,6 +309,7 @@
   }
 
   function updateMaximizeIcon(maximized) {
+    maximizedState = !!maximized;
     var btn = document.querySelector('#dsh-shell-bar [data-action="toggle_maximize"]');
     if (!btn) return;
     btn.replaceChildren(icon(maximized ? RESTORE_PATH : MAXIMIZE_PATH));
@@ -205,6 +323,17 @@
     }).catch(function () {});
   }
   window.__dshShellRefreshWindowState = refreshWindowState;
+
+  // Native shortcuts (Win+Up/Down), taskbar actions and tray restores can
+  // change the state outside our buttons.  Keep the icon and animation kind in
+  // sync as soon as the webview regains focus or its viewport changes.
+  var windowStateSyncTimer = null;
+  function refreshWindowStateSoon() {
+    if (windowStateSyncTimer) clearTimeout(windowStateSyncTimer);
+    windowStateSyncTimer = setTimeout(refreshWindowState, 80);
+  }
+  window.addEventListener("resize", refreshWindowStateSoon);
+  window.addEventListener("focus", refreshWindowState);
 
   var MIN_WIDTH = 900;
   var MIN_HEIGHT = 600;
@@ -529,7 +658,7 @@
     drag.appendChild(status);
     drag.addEventListener("dblclick", function (event) {
       if (event.target.closest(".dsh-bar-btn")) return;
-      safeCall("main_action", ["toggle_maximize"]).then(refreshWindowState);
+      toggleMaximize();
     });
 
     var actions = document.createElement("div");

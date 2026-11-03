@@ -22,6 +22,7 @@ from .mcp_config import McpConfigManager
 from .paths import APP_DISPLAY_NAME, data_dir, icon_path, skills_root
 from .skills import SkillsManager
 from .version import __version__
+from .window_manager import attach_windows_frameless_window, maximize_window_to_work_area
 
 
 def _open_path(path: Path) -> bool:
@@ -109,6 +110,12 @@ class ShellApi:
         else:
             main.events.maximized += self._mark_maximized
             main.events.restored += self._mark_restored
+            if sys.platform == "win32":
+                # pywebview uses WinForms with FormBorderStyle.None here. Add
+                # the native maximize style and a WM_GETMINMAXINFO handler
+                # before the window is first shown.
+                attach_windows_frameless_window(main, enable_resize=True)
+                attach_windows_frameless_window(settings, enable_resize=True)
 
     def _mark_maximized(self) -> None:
         self._main_maximized = True
@@ -358,6 +365,25 @@ class ShellApi:
             logger.debug("Win32 ShowWindow failed: {}", error)
             return False
 
+    def _windows_maximize(self) -> bool:
+        """Maximize through WinForms with the current monitor's working area."""
+        window = self._main
+        if window is None:
+            return False
+        # The native helper is required for frameless WinForms windows.
+        # pywebview's own maximize() remains only as a last-resort fallback;
+        # the WM_GETMINMAXINFO hook above still limits it to the work area.
+        if maximize_window_to_work_area(window):
+            self._main_maximized = True
+            return True
+        try:
+            window.maximize()
+            self._main_maximized = True
+            return True
+        except Exception as error:
+            logger.debug("Could not maximize main window: {}", error)
+            return False
+
     def prepare_resize(self) -> dict[str, int] | None:
         """Exit maximized state once before an edge-resize drag starts."""
         window = self._main
@@ -592,11 +618,8 @@ class ShellApi:
             elif action == "maximize":
                 if self._linux:
                     self._linux_set_maximized(True)
-                elif self._windows_show(3):  # SW_MAXIMIZE
-                    self._main_maximized = True
-                else:
-                    window.maximize()
-                    self._main_maximized = True
+                elif not self._windows_maximize():
+                    return False
             elif action == "restore":
                 if self._linux:
                     self._linux_set_maximized(False)
@@ -614,12 +637,8 @@ class ShellApi:
                     else:
                         window.restore()
                         self._main_maximized = False
-                else:
-                    if self._windows_show(3):
-                        self._main_maximized = True
-                    else:
-                        window.maximize()
-                        self._main_maximized = True
+                elif not self._windows_maximize():
+                    return False
             elif action == "reload":
                 return self.reload_main()
             elif action == "quit":
